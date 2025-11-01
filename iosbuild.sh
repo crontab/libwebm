@@ -72,12 +72,7 @@ readonly INCLUDES="common/file_util.h
                    mkvmuxer/mkvwriter.h
                    mkvparser/mkvparser.h
                    mkvparser/mkvreader.h"
-readonly PLATFORMS="iPhoneSimulator
-                    iPhoneSimulator64
-                    iPhoneOS-V7
-                    iPhoneOS-V7s
-                    iPhoneOS-V7-arm64"
-readonly TARGETDIR="WebM.framework"
+readonly PLATFORMS="iphoneos iphonesimulator"
 readonly DEVELOPER="$(xcode-select --print-path)"
 readonly PLATFORMSROOT="${DEVELOPER}/Platforms"
 readonly LIPO="$(xcrun -sdk iphoneos${SDK} -find lipo)"
@@ -132,7 +127,6 @@ cat << EOF
   OUTDIR=${OUTDIR}
   INCLUDES=${INCLUDES}
   PLATFORMS=${PLATFORMS}
-  TARGETDIR=${TARGETDIR}
   DEVELOPER=${DEVELOPER}
   LIPO=${LIPO}
   OPT_FLAGS=${OPT_FLAGS}
@@ -140,30 +134,34 @@ cat << EOF
 EOF
 fi
 
-rm -rf "${OUTDIR}/${TARGETDIR}"
-mkdir -p "${OUTDIR}/${TARGETDIR}/Headers/"
-
+# Build each platform separately then merge everything into a xcframework. Is there a shorter way?
 for PLATFORM in ${PLATFORMS}; do
   ARCH2=""
-  if [ "${PLATFORM}" = "iPhoneOS-V7-arm64" ]; then
-    PLATFORM="iPhoneOS"
+  if [ "${PLATFORM}" = "iphoneos" ]; then
     ARCH="aarch64"
-    ARCH2="arm64"
-  elif [ "${PLATFORM}" = "iPhoneOS-V7s" ]; then
-    PLATFORM="iPhoneOS"
-    ARCH="armv7s"
-  elif [ "${PLATFORM}" = "iPhoneOS-V7" ]; then
-    PLATFORM="iPhoneOS"
-    ARCH="armv7"
-  elif [ "${PLATFORM}" = "iPhoneOS-V6" ]; then
-    PLATFORM="iPhoneOS"
-    ARCH="armv6"
-  elif [ "${PLATFORM}" = "iPhoneSimulator64" ]; then
-    PLATFORM="iPhoneSimulator"
+    TARGET_ARCH="arm64-apple-ios18.0"
+  elif [ "${PLATFORM}" = "iphonesimulator" ]; then
     ARCH="x86_64"
+    TARGET_ARCH="arm64-apple-ios18.0-simulator"
   else
-    ARCH="i386"
+    echo "Invalid architecture"
+    exit
   fi
+
+  TARGETDIR="${OUTDIR}/WebM-${PLATFORM}.framework"
+
+  rm -rf "${TARGETDIR}"
+
+  # Copy public headers
+  mkdir -p "${TARGETDIR}/Headers/"
+  framework_header_dir="${TARGETDIR}/Headers"
+  framework_header_sub_dirs="common mkvmuxer mkvparser"
+  for dir in ${framework_header_sub_dirs}; do
+    mkdir "${framework_header_dir}/${dir}"
+  done
+  for header_file in ${INCLUDES}; do
+    eval cp -p ${header_file} "${framework_header_dir}/${header_file}" ${devnull}
+  done
 
   LIBDIR="${OUTDIR}/${PLATFORM}-${SDK}-${ARCH}"
   LIBDIRS="${LIBDIRS} ${LIBDIR}"
@@ -172,36 +170,27 @@ for PLATFORM in ${PLATFORMS}; do
 
   DEVROOT="${DEVELOPER}/Toolchains/XcodeDefault.xctoolchain"
   SDKROOT="${PLATFORMSROOT}/"
-  SDKROOT="${SDKROOT}${PLATFORM}.platform/Developer/SDKs/${PLATFORM}${SDK}.sdk/"
-  CXXFLAGS="-arch ${ARCH2:-${ARCH}} -isysroot ${SDKROOT} ${OPT_FLAGS}
-            -miphoneos-version-min=6.0"
-
-  # enable bitcode if available
-  if [ "${SDK_MAJOR_VERSION}" -gt 8 ]; then
-    CXXFLAGS="${CXXFLAGS} -fembed-bitcode"
-  fi
+  SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+  CXXFLAGS="-target ${TARGET_ARCH} -isysroot ${SDKROOT} ${OPT_FLAGS}"
 
   # Build using the legacy makefile (instead of generating via cmake).
   eval make -f Makefile.unix libwebm.a CXXFLAGS=\"${CXXFLAGS}\" ${devnull}
 
   # copy lib and add it to LIBLIST.
   eval cp libwebm.a "${LIBFILE}" ${devnull}
-  LIBLIST="${LIBLIST} ${LIBFILE}"
+
+  FWFILE="${TARGETDIR}/WebM-${PLATFORM}"
+  eval ${LIPO} -create ${LIBFILE} -output ${FWFILE} ${devnull}
+
+  FWDIRS="${FWDIRS} ${TARGETDIR}"
+  FWOPTS="${FWOPTS} -framework ${TARGETDIR}"
 
   # clean build so we can go again.
   eval make -f Makefile.unix clean ${devnull}
 done
 
-# create include sub dirs in framework dir.
-readonly framework_header_dir="${OUTDIR}/${TARGETDIR}/Headers"
-readonly framework_header_sub_dirs="common mkvmuxer mkvparser"
-for dir in ${framework_header_sub_dirs}; do
-  mkdir "${framework_header_dir}/${dir}"
-done
+eval xcodebuild -create-xcframework ${FWOPTS} -output "${OUTDIR}/WebM.xcframework" ${devnull}
 
-for header_file in ${INCLUDES}; do
-  eval cp -p ${header_file} "${framework_header_dir}/${header_file}" ${devnull}
-done
+rm -rf ${FWDIRS}
 
-eval ${LIPO} -create ${LIBLIST} -output "${OUTDIR}/${TARGETDIR}/WebM" ${devnull}
-echo "Succesfully built ${TARGETDIR} in ${OUTDIR}."
+echo "Succesfully built WebM.xcframework."

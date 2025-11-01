@@ -180,7 +180,25 @@ for PLATFORM in ${PLATFORMS}; do
   eval cp libwebm.a "${LIBFILE}" ${devnull}
 
   FWFILE="${TARGETDIR}/WebM-${PLATFORM}"
-  eval ${LIPO} -create ${LIBFILE} -output ${FWFILE} ${devnull}
+  eval ${LIPO} -create ${LIBFILE} -output ${FWFILE}
+
+  # Create Info.plist
+  cat > ${TARGETDIR}/Info.plist << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>WebM-${PLATFORM}</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.melikyan.WebM</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundlePackageType</key>
+    <string>FMWK</string>
+</dict>
+</plist>
+EOF
 
   FWDIRS="${FWDIRS} ${TARGETDIR}"
   FWOPTS="${FWOPTS} -framework ${TARGETDIR}"
